@@ -35,6 +35,7 @@ interface CallCardConfig {
     buttons: Button[];
     extensions: { [key: string]: Extension };
     idle_text: string;
+    camera_entity: string | null;
     largeUI: boolean;
 }
 
@@ -253,11 +254,21 @@ class SIPCallCard extends LitElement {
                 }" playsinline id="remoteVideo"></video>
                 ${
                     sipCore.callState === CALLSTATE.IDLE
-                        ? html`
-                              <div class="placeholder">
-                                  <span>${this.config?.idle_text ?? "No active call"}</span>
-                              </div>
-                          `
+                        ? this.config?.camera_entity
+                            ? html`
+                                  <hui-image
+                                      tabindex="0"
+                                      .cameraImage=${this.config.camera_entity}
+                                      .hass=${this.hass}
+                                      .cameraView=${"live"}
+                                      .aspectRatio=${"16:9"}
+                                  ></hui-image>
+                              `
+                            : html`
+                                  <div class="placeholder">
+                                      <span>${this.config?.idle_text ?? "No active call"}</span>
+                                  </div>
+                              `
                         : camera
                         ? html`
                               <hui-image
