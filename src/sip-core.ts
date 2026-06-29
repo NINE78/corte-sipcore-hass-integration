@@ -161,6 +161,19 @@ export class SIPCore {
     }
 
     private async callOptions(): Promise<CallOptions> {
+        // Pre-activate the audio element during the user-gesture call chain so that
+        // the later async play() (triggered by the WebRTC 'track' event) is allowed
+        // by the browser's autoplay policy.  This is especially necessary on iOS
+        // Safari and in dormant/reopened tabs where play() called outside a gesture
+        // is blocked.  Playing a muted empty MediaStream is always permitted and
+        // marks the element as "user-activated" for subsequent unmuted plays.
+        const remoteAudio = document.getElementById("remoteAudio") as HTMLAudioElement;
+        if (remoteAudio && !remoteAudio.srcObject) {
+            remoteAudio.muted = true;
+            remoteAudio.srcObject = new MediaStream();
+            remoteAudio.play().catch(() => {});
+        }
+
         let micStream: MediaStream | undefined = undefined;
         if (this.AudioInputId !== null) {
             console.debug(`Using audio input device: ${this.AudioInputId}`);
@@ -477,6 +490,12 @@ export class SIPCore {
                 this.RTCSession = null;
                 this.remoteVideoStream = null;
                 this.remoteAudioStream = null;
+                const remoteAudio = document.getElementById("remoteAudio") as HTMLAudioElement;
+                if (remoteAudio) {
+                    remoteAudio.pause();
+                    remoteAudio.srcObject = null;
+                    remoteAudio.muted = false;
+                }
                 this.stopCallTimer();
                 this.stopOutgoingTone();
                 this.stopIncomingRingtone();
@@ -488,6 +507,12 @@ export class SIPCore {
                 this.RTCSession = null;
                 this.remoteVideoStream = null;
                 this.remoteAudioStream = null;
+                const remoteAudio = document.getElementById("remoteAudio") as HTMLAudioElement;
+                if (remoteAudio) {
+                    remoteAudio.pause();
+                    remoteAudio.srcObject = null;
+                    remoteAudio.muted = false;
+                }
                 this.stopCallTimer();
                 this.stopOutgoingTone();
                 this.stopIncomingRingtone();
@@ -574,14 +599,22 @@ export class SIPCore {
             stream.addTrack(e.track);
         }
 
-        let remoteAudio = document.getElementById("remoteAudio") as HTMLAudioElement;
-        if (e.track.kind === "audio" && remoteAudio.srcObject != stream) {
+        const remoteAudio = document.getElementById("remoteAudio") as HTMLAudioElement;
+        if (!remoteAudio) {
+            console.error("remoteAudio element not found");
+            return;
+        }
+
+        if (e.track.kind === "audio" && remoteAudio.srcObject !== stream) {
             this.remoteAudioStream = stream;
             remoteAudio.srcObject = stream;
-            try {
-                await remoteAudio.play();
-            } catch (err) {
-                console.error("Error starting audio playback: " + err);
+            remoteAudio.muted = false;
+            if (remoteAudio.paused) {
+                try {
+                    await remoteAudio.play();
+                } catch (err) {
+                    console.error("Error starting audio playback: " + err);
+                }
             }
         }
 
