@@ -318,6 +318,24 @@ export class SIPCore {
 
         console.debug(`Connecting to ${this.wssUrl}...`);
         this.ua.start();
+
+        // When the HA app/tab is foregrounded after being suspended or backgrounded
+        // the WebSocket connection is usually dead.  Re-create and restart the UA
+        // so the client re-registers without requiring a full page reload.
+        document.addEventListener("visibilitychange", async () => {
+            if (document.visibilityState === "visible" && !this.ua.isRegistered()) {
+                console.info("Page became visible and SIP UA is not registered — reconnecting...");
+                // Refresh the ingress session cookie first — it may have expired
+                // while the page was in the background, causing the WebSocket
+                // handshake to be rejected with 401 by the supervisor.
+                await this.createHassioSession();
+                this.ua.stop();
+                this.ua = this.setupUA();
+                this.ua.start();
+                this.triggerUpdate();
+            }
+        });
+
         if (this.config.popup_config !== null) {
             this.setupPopup();
         }
@@ -460,17 +478,29 @@ export class SIPCore {
                 clearInterval(this.heartBeatHandle);
             }
         });
+        ua.on("disconnected", (e: any) => {
+            console.warn("WebSocket disconnected", e);
+            this.triggerUpdate();
+            if (this.heartBeatHandle != null) {
+                clearInterval(this.heartBeatHandle);
+                this.heartBeatHandle = null;
+            }
+        });
         ua.on("registrationFailed", (e) => {
             console.error("Registration failed:", e);
             this.triggerUpdate();
             if (this.heartBeatHandle != null) {
                 clearInterval(this.heartBeatHandle);
+                this.heartBeatHandle = null;
             }
 
             if (e.cause === "Connection Error") {
                 console.error("Connection error. Retrying...");
-                setTimeout(() => {
-                    this.ua.start();
+                setTimeout(async () => {
+                    // Refresh the ingress session before retrying — a stale
+                    // cookie is a common cause of repeated WebSocket 401s.
+                    await this.createHassioSession();
+                    ua.start();
                 }, 5000);
             }
         });
